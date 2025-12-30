@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Offline Werewolves</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #121212;
+  color: #f2f2f2;
+  padding: 16px;
+  max-width: 800px;
+  margin: auto;
+}
+h1, h2 { text-align: center; }
+textarea, select, button {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  font-size: 16px;
+}
+button {
+  background: #333;
+  color: white;
+  border: none;
+  border-radius: 8px;
+}
+button:hover { background: #555; }
+.section {
+  border-top: 1px solid #333;
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.player {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px;
+  border-bottom: 1px solid #333;
+}
+.dead { text-decoration: line-through; color: #888; }
+.role { color: gold; font-weight: bold; margin-left: 6px; }
+.hidden { visibility: hidden; }
+/* ROLE OVERLAY */
+.role-overlay, .hunter-overlay, .win-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.95);
+  display: none;
+  z-index: 999;
+  padding: 24px;
+  text-align: center;
+}
+.role-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.role-icon { font-size: 80px; }
+.role-name { font-size: 32px; color: gold; margin-top: 12px; }
+.role-desc { margin-top: 14px; line-height: 1.5; }
+.swipe-hint { margin-top: 30px; font-size: 12px; opacity: 0.7; }
+.hunter-list button {
+  margin-top: 10px;
+}
+.win-icon { font-size: 90px; }
+.win-text { font-size: 32px; margin-top: 20px; }
+.potion {
+  font-size: 12px;
+  padding: 4px 6px;
+  margin-left: 4px;
+  background: #444;
+}
+.used { background: darkred; }
+pre {
+  background: #1e1e1e;
+  padding: 12px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+</style>
+</head>
+
+<body>
+
+<h1 id="title">🐺 Werewolves</h1>
+
+<div class="section">
+<h2 id="settingsHeading">1️⃣ Game Settings</h2>
+
+<label id="languageLabel">Language:
+  <select id="language">
+    <option value="en">English</option>
+    <option value="zh">中文</option>
+    <option value="both">English + 中文</option>
+  </select>
+</label>
+<br><br>
+<label><input type="checkbox" id="seer" checked> <span id="seerLabel">Seer</span></label><br>
+<label><input type="checkbox" id="witch" checked> <span id="witchLabel">Witch</span></label><br>
+<label><input type="checkbox" id="hunter" checked> <span id="hunterLabel">Hunter</span></label>
+</div>
+
+<div class="section">
+<h2 id="playersHeading">2️⃣ Player Names</h2>
+<textarea id="names" rows="6" placeholder="One name per line"></textarea>
+<button id="startBtn" onclick="startGame()">Start Game</button>
+</div>
+
+<div class="section">
+<h2 id="roleRevealHeading">3️⃣ Role Reveal (Private)</h2>
+<select id="playerSelect"></select>
+<button id="revealBtn" onclick="revealRole()">Reveal Role</button>
+</div>
+
+<div id="roleOverlay" class="role-overlay">
+  <div class="role-card">
+    <div id="roleIcon" class="role-icon"></div>
+    <div id="roleName" class="role-name"></div>
+    <div id="roleDesc" class="role-desc"></div>
+    <button id="hideRoleBtn" onclick="hideRole()">Hide Role</button>
+    <div class="swipe-hint" id="swipeHint">⬇️ Swipe down to hide</div>
+  </div>
+</div>
+
+<div class="section">
+<h2 id="playerStatusHeading">4️⃣ Player Status</h2>
+<button id="toggleRolesBtn" onclick="toggleAllRoles()">👁️ Show / Hide All Roles</button>
+<div id="playerList"></div>
+</div>
+
+<div class="section">
+<h2 id="moderatorScriptsHeading">5️⃣ Moderator Scripts</h2>
+<button id="nightBtn" onclick="night()">🌙 Night</button>
+<button id="morningBtn" onclick="morning()">☀️ Morning</button>
+<button id="speakBtn" onclick="toggleSpeech()">🔊 Speak / Stop</button>
+<pre id="scriptBox"></pre>
+</div>
+
+<!-- HUNTER OVERLAY -->
+<div id="hunterOverlay" class="hunter-overlay">
+  <h2 id="hunterHeading">🏹 Hunter has died</h2>
+  <p id="hunterText">Choose one player to die</p>
+  <div id="hunterTargets" class="hunter-list"></div>
+</div>
+
+<!-- WIN OVERLAY -->
+<div id="winOverlay" class="win-overlay">
+  <div id="winIcon" class="win-icon"></div>
+  <div id="winText" class="win-text"></div>
+  <button id="winCloseBtn" onclick="closeWin()">Close</button>
+</div>
+
+<script>
+let players = [];
+let showRoles = false;
+let languageMode = "en";
+let startY = 0;
+
+/* ======================
+   LOCALIZATION TEXT
+====================== */
+const TEXT = {
+  en: {
+    title: "🐺 Werewolves",
+    settings: "1️⃣ Game Settings",
+    language: "Language:",
+    seer: "Seer",
+    witch: "Witch",
+    hunter: "Hunter",
+    players: "2️⃣ Player Names",
+    startGame: "Start Game",
+    roleReveal: "3️⃣ Role Reveal (Private)",
+    revealRole: "Reveal Role",
+    hideRole: "Hide Role",
+    playerStatus: "4️⃣ Player Status",
+    showHideRoles: "👁️ Show / Hide All Roles",
+    kill: "Kill",
+    revive: "Revive",
+    potionAntidote: "🧪",
+    potionPoison: "☠️",
+    moderatorScripts: "5️⃣ Moderator Scripts",
+    night: "🌙 Night",
+    morning: "☀️ Morning",
+    speak: "🔊 Speak / Stop",
+    hunterDie: "🏹 Hunter has died",
+    hunterChoose: "Choose one player to die",
+    winClose: "Close",
+    swipeHint: "⬇️ Swipe down to hide"
+  },
+  zh: {
+    title: "🐺 狼人杀",
+    settings: "1️⃣ 游戏设置",
+    language: "语言：",
+    seer: "预言家",
+    witch: "女巫",
+    hunter: "猎人",
+    players: "2️⃣ 玩家名单",
+    startGame: "开始游戏",
+    roleReveal: "3️⃣ 身份展示（私密）",
+    revealRole: "展示身份",
+    hideRole: "隐藏身份",
+    playerStatus: "4️⃣ 玩家状态",
+    showHideRoles: "👁️ 显示 / 隐藏 所有身份",
+    kill: "杀死",
+    revive: "复活",
+    potionAntidote: "🧪",
+    potionPoison: "☠️",
+    moderatorScripts: "5️⃣ 主持人提示",
+    night: "🌙 夜晚",
+    morning: "☀️ 白天",
+    speak: "🔊 朗读 / 停止",
+    hunterDie: "🏹 猎人死亡",
+    hunterChoose: "选择一名玩家死亡",
+    winClose: "关闭",
+    swipeHint: "⬇️ 下滑隐藏"
+  }
+};
+
+/* ======================
+   SAFE LOCALIZATION FUNCTION
+====================== */
+function L(key){
+  if(languageMode==="both") return TEXT.en[key]+" / "+TEXT.zh[key];
+  return TEXT[languageMode][key];
+}
+
+/* ======================
+   ROLE INFO
+====================== */
+const ROLE_INFO = {
+  Werewolf: { icon: "🐺", desc: {en:"Eliminate villagers at night.", zh:"夜晚淘汰村民。"} },
+  Villager: { icon: "🧑‍🌾", desc: {en:"No abilities. Find the werewolves.", zh:"无特殊能力，找出狼人。"} },
+  Seer: { icon: "🔮", desc: {en:"Check one player each night.", zh:"每晚可以查看一名玩家身份。"} },
+  Witch: { icon: "🧪", desc: {en:"One antidote and one poison.", zh:"拥有一瓶解药和一瓶毒药。"} },
+  Hunter: { icon: "🏹", desc: {en:"If you die, kill one player.", zh:"死亡时可以带走一名玩家。"} }
+};
+
+/* ======================
+   LANGUAGE UTIL
+====================== */
+function t(en, zh){
+  if(languageMode==="en") return en;
+  if(languageMode==="zh") return zh;
+  return en + "\n" + zh;
+}
+
+/* ======================
+   UI LOCALIZATION
+====================== */
+function localizeUI(){
+  function text(key){
+    if(languageMode==="both") return TEXT.en[key]+" / "+TEXT.zh[key];
+    return TEXT[languageMode][key];
+  }
+  document.getElementById("title").textContent = text("title");
+  document.getElementById("settingsHeading").textContent = text("settings");
+  document.getElementById("languageLabel").childNodes[0].textContent = text("language");
+  document.getElementById("seerLabel").textContent = text("seer");
+  document.getElementById("witchLabel").textContent = text("witch");
+  document.getElementById("hunterLabel").textContent = text("hunter");
+  document.getElementById("playersHeading").textContent = text("players");
+  document.getElementById("startBtn").textContent = text("startGame");
+  document.getElementById("roleRevealHeading").textContent = text("roleReveal");
+  document.getElementById("revealBtn").textContent = text("revealRole");
+  document.getElementById("hideRoleBtn").textContent = text("hideRole");
+  document.getElementById("swipeHint").textContent = text("swipeHint");
+  document.getElementById("playerStatusHeading").textContent = text("playerStatus");
+  document.getElementById("toggleRolesBtn").textContent = text("showHideRoles");
+  document.getElementById("moderatorScriptsHeading").textContent = text("moderatorScripts");
+  document.getElementById("nightBtn").textContent = text("night");
+  document.getElementById("morningBtn").textContent = text("morning");
+  document.getElementById("speakBtn").textContent = text("speak");
+  document.getElementById("hunterHeading").textContent = text("hunterDie");
+  document.getElementById("hunterText").textContent = text("hunterChoose");
+  document.getElementById("winCloseBtn").textContent = text("winClose");
+}
+
+document.getElementById("language").addEventListener("change", e=>{
+  languageMode=e.target.value;
+  localizeUI();
+  night();
+});
+
+/* ======================
+   GAME LOGIC
+====================== */
+function startGame() {
+  const names = document.getElementById("names").value.split("\n").map(n=>n.trim()).filter(Boolean);
+  if(names.length<3) return alert("At least 3 players");
+
+  let roles=[];
+  const wolves=Math.max(1,Math.floor(names.length/4));
+  for(let i=0;i<wolves;i++) roles.push("Werewolf");
+  if(seer.checked) roles.push("Seer");
+  if(witch.checked) roles.push("Witch");
+  if(hunter.checked) roles.push("Hunter");
+  while(roles.length<names.length) roles.push("Villager");
+  roles.sort(()=>Math.random()-0.5);
+
+  players = names.map((n,i)=>({name:n,role:roles[i],alive:true,antidote:false,poison:false,hunterUsed:false}));
+
+  populateSelect();
+  renderPlayers();
+}
+
+function populateSelect(){
+  playerSelect.innerHTML="";
+  players.forEach((p,i)=>{
+    const o=document.createElement("option");
+    o.value=i;
+    o.textContent=p.name;
+    playerSelect.appendChild(o);
+  });
+}
+
+function revealRole(){
+  const p=players[playerSelect.value];
+  const r=ROLE_INFO[p.role];
+  roleIcon.textContent=r.icon;
+  roleName.textContent=p.role;
+  roleDesc.textContent=r.desc[languageMode] || r.desc.en;
+  roleOverlay.style.display="block";
+}
+function hideRole(){ roleOverlay.style.display="none"; }
+roleOverlay.addEventListener("touchstart",e=>startY=e.touches[0].clientY);
+roleOverlay.addEventListener("touchend",e=>{
+  if(e.changedTouches[0].clientY - startY > 100) hideRole();
+});
+
+function renderPlayers(){
+  playerList.innerHTML="";
+  players.forEach((p,i)=>{
+    const div=document.createElement("div");
+    div.className="player "+(p.alive?"":"dead");
+    div.innerHTML=`
+      <div>${p.name} <span class="role ${showRoles?"":"hidden"}">(${p.role})</span></div>
+      <div>
+      ${showRoles && p.role==="Witch"?`
+        <button class="potion ${p.antidote?"used":""}" onclick="togglePotion(${i},'antidote')">🧪</button>
+        <button class="potion ${p.poison?"used":""}" onclick="togglePotion(${i},'poison')">☠️</button>`:""}
+        <button onclick="toggleLife(${i})">${p.alive?L("kill"):L("revive")}</button>
+      </div>
+    `;
+    playerList.appendChild(div);
+  });
+}
+
+function toggleLife(i){
+  const wasAlive=players[i].alive;
+  players[i].alive=!players[i].alive;
+  renderPlayers();
+  if(wasAlive && !players[i].alive && players[i].role==="Hunter" && !players[i].hunterUsed){
+    triggerHunter(i);
+  }
+  checkWinCondition();
+}
+function togglePotion(i,type){ players[i][type]=!players[i][type]; renderPlayers();}
+function toggleAllRoles(){ showRoles=!showRoles; renderPlayers(); }
+
+function triggerHunter(i){
+  players[i].hunterUsed=true;
+  hunterTargets.innerHTML="";
+  players.forEach((p,idx)=>{
+    if(p.alive){
+      const btn=document.createElement("button");
+      btn.textContent=p.name;
+      btn.onclick=()=>{
+        p.alive=false;
+        hunterOverlay.style.display="none";
+        renderPlayers();
+        checkWinCondition();
+      };
+      hunterTargets.appendChild(btn);
+    }
+  });
+  hunterOverlay.style.display="block";
+}
+
+function checkWinCondition(){
+  const alive=players.filter(p=>p.alive);
+  const wolves=alive.filter(p=>p.role==="Werewolf").length;
+  const others=alive.length-wolves;
+  if(wolves===0) showWin("🧑‍🌾",t("Villagers Win!","村民胜利！"));
+  else if(wolves>=others) showWin("🐺",t("Werewolves Win!","狼人胜利！"));
+  else winOverlay.style.display="none";
+}
+function showWin(icon,text){ winIcon.textContent=icon; winText.textContent=text; winOverlay.style.display="block"; }
+function closeWin(){ winOverlay.style.display="none"; }
+
+/* ======================
+   MODERATOR SCRIPT
+====================== */
+function generateNightScript(){
+  let script=[];
+  script.push(t("Everyone, close your eyes. The village falls asleep.","所有人请闭上眼睛，村庄进入黑夜。"));
+  script.push("");
+  script.push(t("Werewolves, open your eyes and recognize each other.","狼人请睁眼，相互确认身份。"));
+  script.push(t("Werewolves, choose one player to eliminate.","狼人请选择一名玩家淘汰。"));
+  script.push(t("Werewolves, close your eyes.","狼人请闭眼。"));
+  if(seer.checked && players.some(p=>p.role==="Seer"&&p.alive)){
+    script.push("");
+    script.push(t("Seer, open your eyes.","预言家请睁眼。"));
+    script.push(t("Seer, point to one player to check.","预言家请选择一名玩家查验身份。"));
+    script.push(t("This player is a Werewolf or not a Werewolf.","该玩家的身份是狼人或非狼人。"));
+    script.push(t("Seer, close your eyes.","预言家请闭眼。"));
+  }
+  if(witch.checked && players.some(p=>p.role==="Witch"&&p.alive)){
+    script.push("");
+    script.push(t("Witch, open your eyes.","女巫请睁眼。"));
+    script.push(t("Someone was attacked tonight.","今晚有人被袭击。"));
+    script.push(t("You may use your antidote or poison. Only one potion per night.","你可以使用解药或毒药，每晚只能使用一瓶。"));
+    script.push(t("Witch, close your eyes.","女巫请闭眼。"));
+  }
+  script.push("");
+  script.push(t("Everyone, open your eyes. Night is over.","天亮了，所有人请睁眼。"));
+  return script.join("\n");
+}
+function generateMorningScript(){
+  let script=[];
+  script.push(t("When the village wakes up, we discover who died last night.","村民们醒来，看看昨晚谁死了。"));
+  return script.join("\n");
+}
+function night(){ scriptBox.textContent=generateNightScript(); }
+function morning(){ scriptBox.textContent=generateMorningScript(); }
+
+/* ======================
+   TEXT TO SPEECH
+====================== */
+let speaking=false;
+function toggleSpeech(){
+  if(speaking){ speechSynthesis.cancel(); speaking=false; return; }
+  let utter=new SpeechSynthesisUtterance(scriptBox.textContent);
+  utter.lang=(languageMode==="zh")?"zh-CN":"en-US";
+  speechSynthesis.speak(utter);
+  speaking=true;
+  utter.onend=()=>speaking=false;
+}
+
+/* ======================
+   INITIALIZE
+====================== */
+localizeUI();
+</script>
+
+</body>
+</html>
